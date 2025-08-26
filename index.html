@@ -497,10 +497,19 @@
     $('#btn-clear').addEventListener('click', ()=>{ $('#bulk').value=''; $('#groupBulk').value=''; $('#reverseBulk').value=''; });
 
     // グループ追加
-    $('#btn-add-group').addEventListener('click', ()=>{
-      const name = ($('#newGroupName').value||'').trim(); if(!name) return;
-      groups.add(name); renderGroups(); renderQuestions(); $('#newGroupName').value=''; saveWorking();
-    });
+$('#btn-add-group').addEventListener('click', ()=>{
+  const name = ($('#newGroupName').value || '').trim();
+  if(!name) { alert('グループ名を入力してください'); return; }
+
+  // 既にある名前はスキップ
+  if([...groups].includes(name)) { alert('同名のグループがあります'); return; }
+
+  groups.add(name);
+  renderGroups();
+  renderQuestions();
+  $('#newGroupName').value = '';
+  saveWorking();
+});
 
     // 集計
     $('#btn-calc').addEventListener('click', ()=>{
