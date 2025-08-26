@@ -71,6 +71,10 @@
     <section id="tab-edit" class="tabpanel">
       <div class="card">
         <h2>1) バルク作成（まとめコピペ → 設問化）</h2>
+        <!-- タイトル入力（保存名） -->
+        <div class="row" style="margin-bottom:8px">
+          <input id="titleInput" type="text" placeholder="タイトル（保存名） 例：セルフチェック 2025-08-26" />
+        </div>
         <textarea id="bulk" placeholder="1行=1設問で貼り付け。番号や・は自動トリムします。"></textarea>
         <div class="row" style="margin-top:10px">
           <label>回答スケール：
@@ -98,6 +102,10 @@
           <span class="muted">既定は <span class="chip">未割当</span></span>
         </div>
         <div id="groupList" class="row" style="margin-top:8px"></div>
+        <!-- すべてクリア -->
+        <div class="row" style="margin-top:8px">
+          <button class="btn warn" id="btn-reset-all">すべてクリア</button>
+        </div>
       </div>
 
       <div class="card">
@@ -246,10 +254,41 @@
       });
     });
 
-    // ====== グループ一覧UI ======
+    // ====== グループ一覧UI（×削除付き） ======
     function renderGroups(){
-      const el = $('#groupList'); el.innerHTML='';
-      [...groups].forEach(g=>{ const span=document.createElement('span'); span.className='chip'; span.textContent=g; el.appendChild(span); });
+      const el = $('#groupList'); if(!el) return;
+      el.innerHTML='';
+
+      [...groups].forEach(g=>{
+        const chip = document.createElement('span');
+        chip.className='chip';
+        chip.style.display='inline-flex';
+        chip.style.alignItems='center';
+        chip.style.gap='6px';
+        chip.textContent = g;
+
+        if(g !== '未割当'){
+          const del = document.createElement('button');
+          del.textContent = '×';
+          del.title = 'このグループを削除';
+          del.style.background = 'transparent';
+          del.style.border = '0';
+          del.style.color = 'var(--muted)';
+          del.style.cursor = 'pointer';
+          del.style.fontSize = '14px';
+          del.addEventListener('click', ()=>{
+            if(!confirm(`グループ「${g}」を削除しますか？\n（このグループに属する設問は「未割当」に戻ります）`)) return;
+            groups.delete(g);
+            questions.forEach(q=>{ if(q.group===g) q.group='未割当'; });
+            renderGroups();
+            renderQuestions();
+            saveWorking();
+          });
+          chip.appendChild(del);
+        }
+
+        el.appendChild(chip);
+      });
     }
 
     // ====== 設問UI ======
@@ -278,12 +317,17 @@
       wrap.appendChild(row);
       return wrap;
     }
-    function renderQuestions(){ const box=$('#questionList'); box.innerHTML=''; questions.forEach((q,i)=> box.appendChild(buildQuestionRow(q,i))); updateSummary(); }
+    function renderQuestions(){
+      const box=$('#questionList'); if(!box) return;
+      box.innerHTML=''; questions.forEach((q,i)=> box.appendChild(buildQuestionRow(q,i)));
+      updateSummary();
+    }
 
     // ====== 要約（未回答数など） ======
     function updateSummary(){
+      const el = $('#summary'); if(!el) return;
       const answered = questions.filter(q=>typeof q.answer==='number').length;
-      $('#summary').textContent = `回答数：${answered} / 全${questions.length}（未回答：${questions.length - answered}）`;
+      el.textContent = `回答数：${answered} / 全${questions.length}（未回答：${questions.length - answered}）`;
     }
 
     // ====== 反転／集計 ======
@@ -298,48 +342,47 @@
       }
       return byGroup;
     }
+
+    // ====== 表・レーダー描画 ======
     function renderTableAndChart(byGroup){
-  const metric = $('#metric').value; // 'avg'|'sum'
-  $('#metricHeader').textContent = (metric==='avg'?'平均':'合計');
+      const metric=$('#metric').value; // 'avg'|'sum'
+      $('#metricHeader').textContent = (metric==='avg'?'平均':'合計');
 
-  const tbody = $('#scoreTable tbody'); 
-  tbody.innerHTML = '';
-  const labels = [];
-  const values = [];
-  let maxN = 0;
+      const tbody = $('#scoreTable tbody'); tbody.innerHTML='';
+      const labels=[]; const values=[]; let maxN=0;
 
-  // 「ユーザーが新しいグループを追加していない」か判定
-  const noCustomGroups = (groups.size === 1); // 中身は ['未割当'] だけ
+      // 未割当のみなら「グループなし」と表記
+      const noCustomGroups = (groups.size === 1);
 
-  Object.entries(byGroup).forEach(([g,{sum,n}])=>{
-    maxN = Math.max(maxN, n);
-    const val = (metric==='avg') ? (n ? sum/n : 0) : sum;
+      Object.entries(byGroup).forEach(([g,{sum,n}])=>{
+        maxN=Math.max(maxN,n); const val=(metric==='avg')?(n?sum/n:0):sum;
+        const displayName = (g === '未割当' && noCustomGroups) ? 'グループなし' : g;
 
-    // 表示名：未割当のみなら「グループなし」に置き換え
-    const displayName = (g === '未割当' && noCustomGroups) ? 'グループなし' : g;
+        const tr=document.createElement('tr'); tr.innerHTML=`<td>${displayName}</td><td>${n}</td><td>${val.toFixed(2)}</td>`; tbody.appendChild(tr);
+        labels.push(displayName); values.push(+val.toFixed(2));
+      });
 
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${displayName}</td><td>${n}</td><td>${val.toFixed(2)}</td>`;
-    tbody.appendChild(tr);
+      // 最大値（平均は段階数、合計は最大件数×段階数）
+      const maxPossible = scaleMax * (maxN || 1);
+      const rScale = (metric === 'avg')
+        ? {
+            beginAtZero: true,
+            max: scaleMax,
+            pointLabels:{ font:{ size:14 } },
+            ticks:{ display:true, font:{ size:12 } }
+          }
+        : {
+            beginAtZero: true,
+            max: Math.max(scaleMax, maxPossible),
+            pointLabels:{ font:{ size:14 } },
+            ticks:{ display:true, font:{ size:12 } }
+          };
 
-    labels.push(displayName);
-    values.push(+val.toFixed(2));
-  });
-
-  const suggestedMax = (metric==='avg') ? scaleMax : Math.max(scaleMax, scaleMax*(maxN||1));
-  if(chart) chart.destroy();
-  chart = new Chart($('#radar').getContext('2d'), {
-    type: 'radar',
-    data: { labels, datasets: [{ label:(metric==='avg'?'平均スコア':'合計スコア'), data: values, fill: true }] },
-    options: { responsive: true, scales: { r: { beginAtZero: true, suggestedMax } }, plugins: { legend: { display: true } } }
-  });
-}
-      const suggestedMax = (metric==='avg')? scaleMax : Math.max(scaleMax, scaleMax*(maxN||1));
       if(chart) chart.destroy();
       chart = new Chart($('#radar').getContext('2d'), {
         type:'radar',
         data:{ labels, datasets:[{ label:(metric==='avg'?'平均スコア':'合計スコア'), data:values, fill:true }] },
-        options:{ responsive:true, scales:{ r:{ beginAtZero:true, suggestedMax } }, plugins:{ legend:{ display:true } } }
+        options:{ responsive:true, scales:{ r:rScale }, plugins:{ legend:{ display:true, labels:{ font:{ size:14 } } } } }
       });
     }
 
@@ -358,7 +401,9 @@
       const rows=[[ 'グループ','件数', (metric==='avg'?'平均':'合計') ]];
       Object.entries(byGroup).forEach(([g,{sum,n}])=>{
         const val=(metric==='avg')?(n?sum/n:0):sum;
-        rows.push([g,n,val.toFixed(2)]);
+        const noCustomGroups = (groups.size === 1);
+        const displayName = (g === '未割当' && noCustomGroups) ? 'グループなし' : g;
+        rows.push([displayName,n,val.toFixed(2)]);
       });
       return rows;
     }
@@ -382,6 +427,8 @@
     function saveSession(){
       const sessions=loadSessions();
       const byGroup=aggregate();
+      // タイトル未入力なら自動命名
+      templateMeta.name = (templateMeta.name && templateMeta.name.trim()) || `セッション ${nowFile()}`;
       const item={
         id:uid(), time: nowIso(), templateId: templateMeta.id, templateName: templateMeta.name,
         scaleMax, metric: $('#metric').value,
@@ -397,7 +444,7 @@
       sessions.forEach(s=>{
         const row=document.createElement('div'); row.className='item';
         const meta=document.createElement('div'); meta.className='meta';
-        const name=document.createElement('span'); name.textContent = s.templateName || 'Template';
+        const name=document.createElement('span'); name.textContent = s.templateName || 'Session';
         const time=document.createElement('span'); time.className='muted'; time.textContent = new Date(s.time).toLocaleString();
         meta.appendChild(name); meta.appendChild(time);
         const ops=document.createElement('div'); ops.className='row';
@@ -408,11 +455,13 @@
         row.appendChild(meta); row.appendChild(ops); box.appendChild(row);
 
         bLoad.addEventListener('click', ()=>{
-          templateMeta.id = s.templateId||uid(); templateMeta.name = s.templateName||'Template';
+          templateMeta.id = s.templateId||uid(); templateMeta.name = s.templateName||'Session';
           scaleMax = s.scaleMax||7;
           groups = new Set(['未割当', ...new Set(s.answers.map(a=>a.group||'未割当'))]);
           questions = s.answers.map(a=>({ id: uid(), text:a.text, reverse:!!a.reverse, group:a.group||'未割当', answer: (typeof a.answer==='number')? a.answer : null }));
           renderGroups(); renderQuestions(); saveWorking();
+          // タイトル欄へ反映
+          $('#titleInput') && ($('#titleInput').value = templateMeta.name || '');
           alert('セッションを読み込みました（回答も復元）');
         });
         bJson.addEventListener('click', ()=> downloadJSON(`session_${nowFile()}.json`, s));
@@ -459,6 +508,8 @@
       groups = new Set(tpl.groups && tpl.groups.length ? tpl.groups : ['未割当']);
       questions = (tpl.questions||[]).map(q=>({ id: uid(), text:q.text, reverse:!!q.reverse, group:q.group||'未割当', answer:null }));
       renderGroups(); renderQuestions(); saveWorking();
+      // タイトル欄に反映
+      $('#titleInput') && ($('#titleInput').value = templateMeta.name || '');
       // メインタブに戻す
       $$('.tab').forEach(b=>b.classList.remove('active')); $$('[data-tab="edit"]')[0].classList.add('active');
       $$('.tabpanel').forEach(p=>p.classList.add('hidden')); $('#tab-edit').classList.remove('hidden');
@@ -492,24 +543,31 @@
     }
 
     // ====== イベント配線 ======
+    // タイトル入力 → templateMeta.name に反映
+    $('#titleInput')?.addEventListener('input', ()=>{
+      templateMeta.name = ($('#titleInput').value || '').trim() || 'Untitled';
+      saveWorking();
+    });
+
     // バルク生成
     $('#btn-generate').addEventListener('click', applyBulkToQuestions);
     $('#btn-clear').addEventListener('click', ()=>{ $('#bulk').value=''; $('#groupBulk').value=''; $('#reverseBulk').value=''; });
 
     // グループ追加
-$('#btn-add-group').addEventListener('click', ()=>{
-  const name = ($('#newGroupName').value || '').trim();
-  if(!name) { alert('グループ名を入力してください'); return; }
+    $('#btn-add-group').addEventListener('click', ()=>{
+      const name = ($('#newGroupName').value||'').trim(); if(!name){ alert('グループ名を入力してください'); return; }
+      if([...groups].includes(name)){ alert('同名のグループがあります'); return; }
+      groups.add(name); renderGroups(); renderQuestions(); $('#newGroupName').value=''; saveWorking();
+    });
 
-  // 既にある名前はスキップ
-  if([...groups].includes(name)) { alert('同名のグループがあります'); return; }
-
-  groups.add(name);
-  renderGroups();
-  renderQuestions();
-  $('#newGroupName').value = '';
-  saveWorking();
-});
+    // 全データクリア
+    $('#btn-reset-all')?.addEventListener('click', ()=>{
+      if(!confirm('設問・グループ・回答をすべて削除してリセットしますか？')) return;
+      questions = [];
+      groups = new Set(['未割当']);
+      localStorage.removeItem(LS.working);
+      renderGroups(); renderQuestions(); updateSummary();
+    });
 
     // 集計
     $('#btn-calc').addEventListener('click', ()=>{
@@ -555,6 +613,8 @@ $('#btn-add-group').addEventListener('click', ()=>{
         scaleMax = data.scaleMax || 7;
         groups = new Set(data.groups && data.groups.length ? data.groups : ['未割当']);
         questions = (data.questions||[]).map(q=>({ id:q.id||uid(), text:q.text, reverse:!!q.reverse, group:q.group||'未割当', answer:(typeof q.answer==='number')? q.answer : null }));
+        // タイトル欄へ反映
+        $('#titleInput') && ($('#titleInput').value = templateMeta.name || '');
         renderGroups(); renderQuestions(); renderTemplateList(); renderSessions();
       }catch(e){ console.error(e); }
     })();
